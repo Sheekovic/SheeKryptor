@@ -171,9 +171,15 @@ document.querySelectorAll(".reveal-button").forEach((button) => {
   button.addEventListener("click", () => {
     const input = document.querySelector(`#${button.dataset.target}`);
     const revealing = input.type === "password";
+    const fieldName = button.dataset.target === "confirm-password"
+      ? "confirmation password"
+      : "password";
     input.type = revealing ? "text" : "password";
     button.textContent = revealing ? "Hide" : "Show";
-    button.setAttribute("aria-label", `${revealing ? "Hide" : "Show"} password`);
+    button.setAttribute(
+      "aria-label",
+      `${revealing ? "Hide" : "Show"} ${fieldName}`,
+    );
   });
 });
 

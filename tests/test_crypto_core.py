@@ -143,6 +143,24 @@ class CryptoCoreTests(unittest.TestCase):
         self.assertFalse(used_legacy)
         self.assertEqual(desktop_recovered.read_bytes(), payload)
 
+    @unittest.skipUnless(shutil.which("node"), "Node.js is required for web interoperability")
+    def test_web_bridge_rejects_unknown_operations(self):
+        source = self.root / "source.bin"
+        output = self.root / "output.bin"
+        source.write_bytes(b"data")
+        bridge = Path(__file__).with_name("web_crypto_bridge.mjs")
+
+        result = subprocess.run(
+            ["node", bridge, "typo", source, output, "long-enough-password"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Usage:", result.stderr)
+        self.assertFalse(output.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

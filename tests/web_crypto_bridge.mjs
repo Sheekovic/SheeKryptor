@@ -5,7 +5,8 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 await import("../docs/crypto.js");
 
 const [operation, inputPath, outputPath, password] = process.argv.slice(2);
-if (!operation || !inputPath || !outputPath || !password) {
+if (!["encrypt", "decrypt"].includes(operation)
+    || !inputPath || !outputPath || !password) {
   throw new Error("Usage: web_crypto_bridge.mjs encrypt|decrypt input output password");
 }
 

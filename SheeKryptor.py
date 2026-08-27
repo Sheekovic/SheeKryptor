@@ -53,36 +53,10 @@ config.read("settings.ini")
 # Get settings with defaults if not found
 # Default theme is 'equilux'
 settings_theme = config.get("Settings", "theme", fallback="equilux")
-# Default font style is 'OCR A Extended'
 settings_font_style = config.get(
     "Settings", "font_style", fallback="Segoe UI")
 settings_font_size = config.get(
     "Settings", "font_size", fallback="11")
-
-# Function to fetch title and version from the API
-
-
-def fetch_title_and_version():
-    try:
-        # Make the GET request to fetch the data
-        response = requests.get(
-            "https://sheekovic.github.io/api/api.json",
-            timeout=REQUEST_TIMEOUT,
-        )
-        response.raise_for_status()  # Check for request errors
-        data = response.json()
-
-        # Extract title and version
-        # Fallback to default if not found
-        title = data.get("title", "Default Title")
-        # Fallback to default if not found
-        version = data.get("version", "v1.0.0")
-
-        return title, version
-    except requests.exceptions.RequestException as e:
-        messagebox.showerror(
-            "API Error", f"Failed to fetch title and version: {e}")
-        return "SheeKryptor", "v1.0.0"  # Fallback in case of error
 
 # Function to generate a strong password
 
@@ -547,7 +521,7 @@ def unsquashit(input_file, output_dir):
         return result
 
 
-def squashit(input_files, output_file, compression_level=9, _compression_format='zip'):
+def squashit(input_files, output_file, compression_level=9):
     """Create a standard ZIP archive from the selected files."""
     try:
         def update_progress(value):
@@ -1399,19 +1373,9 @@ output_file_entry.grid(row=4, column=1, padx=10, pady=10)
 ttk.Button(squashit_tab, text="Browse", command=lambda: browse_output(
     output_file_entry, 'SquashIt')).grid(row=4, column=2, padx=10, pady=10)
 
-# Compression Format Selection (Updated to Combobox)
-ttk.Label(squashit_tab, text="Compression Format:").grid(
-    row=5, column=0, padx=10, pady=10)
-
-format_combobox = ttk.Combobox(
-    squashit_tab, values=["ZIP (Deflate)"], state="readonly", width=15
-)
-format_combobox.set("ZIP (Deflate)")
-format_combobox.grid(row=5, column=1, padx=10, pady=10)
-
 # Compression Button
 ttk.Button(squashit_tab, text="SquashIT", command=lambda: squashit(input_files_entry.get().split(', '), output_file_entry.get(
-), int(compression_level_combobox.get()), format_combobox.get()), style="Accent.TButton").grid(row=6, column=0, columnspan=3, pady=20)
+), int(compression_level_combobox.get())), style="Accent.TButton").grid(row=5, column=0, columnspan=3, pady=20)
 
 # Result Label
 squashit_result_label = ttk.Label(
