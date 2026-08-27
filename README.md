@@ -1,147 +1,110 @@
-# SheeKryptor!!
+<div align="center">
+  <img src="assets/SheeKryptor.png" alt="SheeKryptor" width="112">
+  <h1>SheeKryptor</h1>
+  <p><strong>Private file encryption for desktop and web.</strong></p>
+  <p>Your files stay on your device. Your password is never transmitted.</p>
 
-SheeKryptor is a secure file encryption and decryption tool designed for ease of use. It allows users to encrypt and decrypt files with strong AES encryption. The tool also includes password generation and personalization features for enhanced security.
+  [![CI](https://github.com/Sheekovic/SheeKryptor/actions/workflows/ci.yml/badge.svg)](https://github.com/Sheekovic/SheeKryptor/actions/workflows/ci.yml)
+  [![GitHub Pages](https://github.com/Sheekovic/SheeKryptor/actions/workflows/pages.yml/badge.svg)](https://sheekovic.github.io/SheeKryptor/)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-43e6b1.svg)](LICENSE)
+</div>
 
-## Features
+## What is SheeKryptor?
 
-- **File Encryption**: Encrypt files securely with AES (CBC mode) using a user-defined password.
-- **File Decryption**: Decrypt encrypted files by providing the correct password.
-- **Password Generator**: Generate strong passwords with the option to create personalized passwords based on your name and date of birth.
-- **API Testing**: Test any API endpoints with the SheeKryptor API , which supports GET, POST, PUT, and DELETE requests.
-- **2FA Tool**: Securely manage and generate OTP codes for Two-Factor Authentication (TOTP) accounts.
-- **SquashIT**: Compress and decompress files using zlib, gzip, and tar.zlib.
-- **ConvertX**: Convert between different file formats, including image to Base64, Base64 to image, text encoding, and Base64 to text.
-- **Temp Mail**: Generate and manage temporary emails for testing purposes.
-- **User-Friendly GUI**: Simple and intuitive graphical interface built using Tkinter.
-- **Customizable Settings**: Change the theme and font style/size for a personalized experience.
-- **Cross-Platform**: Works on Windows, macOS, and Linux.
+SheeKryptor is an open-source privacy toolbox led by authenticated file encryption.
+It includes a Python desktop application and a static browser edition built on the
+Web Crypto API. Both editions use the same versioned `.skrypt` file format.
 
-## Installation
+**[Open the private web edition](https://sheekovic.github.io/SheeKryptor/)**
 
-1. **Clone this repository**:
-   ```bash
-   git clone https://github.com/sheekovic/SheeKryptor.git
-   cd SheeKryptor
-   ```
-   or from GitHub CLI
-   ```bash
-   gh repo clone Sheekovic/SheeKryptor
-   cd SheeKryptor
-   ```
+The web edition has no backend, analytics, cookies, or upload endpoint. Its Content
+Security Policy blocks network requests, so encryption and decryption happen locally.
 
-2. **Install the required dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+> [!IMPORTANT]
+> SheeKryptor has not received an independent cryptographic audit. Keep backups and
+> do not use it as the only protection for life-critical or very high-value data.
 
-3. **Run the program**:
-   ```bash
-   python sheekryptor.py
-   ```
+## Security properties
 
-4. **If you're lazy or this thing is new to you**
--- Run `EasySetup(RunFromHere).bat` file, and you're good to go
+- AES-256-GCM authenticated encryption detects an incorrect password or modified data.
+- PBKDF2-HMAC-SHA-256 with 600,000 iterations and a new 128-bit salt per file.
+- A new 96-bit AES-GCM nonce per file.
+- Authenticated, versioned file headers for safe format evolution.
+- Atomic desktop output: failed authentication cannot replace an existing file.
+- Chunked desktop I/O avoids loading an entire large file into memory.
+- Legacy AES-CBC files can be recovered locally and are clearly marked for migration.
+- Password generation uses the operating system's cryptographically secure randomness.
 
+The browser edition currently limits files to 250 MB because Web Crypto processes the
+selected file in memory. Use the desktop edition for larger files.
 
-## Requirements
+## Desktop quick start
 
-- Python 3.10 or later
-- `cryptography` package
-- `tkinter` (for GUI)
-- `ttkthemes` (for theme styling)
-- `pyotp` package
-- `requests` package
-- `pillow` package
+Requirements: Python 3.10 or newer.
 
-## Usage
+```powershell
+git clone https://github.com/Sheekovic/SheeKryptor.git
+cd SheeKryptor
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python SheeKryptor.py
+```
 
-### Encrypt a File
-1. Go to the "Encryptor" tab.
-2. Select the file you wish to encrypt by clicking "Browse".
-3. Enter a strong password.
-4. Click the "Encrypt" button to generate the encrypted file.
-5. The encrypted file will be saved in the `encrypted_files` folder with `_encrypted` appended to the filename.
-6. Added Log Box for viewing the encryption process logs.
+On Linux or macOS, activate the environment with `source .venv/bin/activate`.
 
-### Decrypt a File
-1. Go to the "Decryptor" tab.
-2. Select the encrypted file by clicking "Browse".
-3. Enter the password used for encryption.
-4. Click the "Decrypt" button to retrieve the original file.
-5. The decrypted file will be saved in the `decrypted_files` folder with `_decrypted` appended to the filename.
-6. Added Log Box for viewing the decryption process logs.
+The desktop toolbox currently includes file encryption, password generation, API
+testing, TOTP management, ZIP archives, conversion utilities, temporary
+mail integration, and appearance settings. Encryption is the security-reviewed focus;
+the other legacy tools are being separated and hardened incrementally.
 
-### Password Generator
-1. Go to the "PWD Generator" tab.
-2. Choose the length for the password you want to generate.
-3. Click "Generate" to create a random strong password.
+## Run the web edition locally
 
-### Personalized Password
-1. Go to the "PWD Generator" tab.
-2. Enter your name and date of birth.
-3. Choose the password length.
-4. Click "Generate" to create a personalized password based on your details.
+No JavaScript dependencies or build step are required.
 
-### API Testing
-1. Go to the "API Testing" tab.
-2. Enter the API endpoint URL.
-3. Select the HTTP method (GET, POST, PUT, DELETE).
-4. Enter any required parameters.
-5. click "Test API" to send the request and view the response.
-6. Save Results to a text file by clicking "Save Results".
+```bash
+python -m http.server 8000
+```
 
-### 2FA Tool - Two Factor Authentication
-1. Go to the "2FA Tool" tab - This section allows you to manage your Two-Factor Authentication (2FA) accounts.
-2. Enter the name of the provider (e.g., Google, Facebook) in the "Provider" field.
-3. Provide the username or email associated with your 2FA account in the "Username/Email" field.
-4. Enter your secret 2FA key in the "2FA Key" field. This key is typically provided by the service when setting up 2FA.
-5. If your 2FA method uses time-based one-time passwords (TOTP), check the "Time Based" checkbox (optional).
-6. Add Your Account Click "Add Account" button to save the 2FA details for this account to the database.
-7. View Accounts All added accounts will be listed in the table below, showing the provider name, username/email, and the generated OTP (One-Time Password) for that account.
-8. Delete an Account.
-   - To delete an account, select the account from the "Select Account" dropdown.
-   - Click "Delete Account" to remove it from the database.
-9. OTP Refresh for each account will be refreshed every second to show the current code. The table will display the updated OTP in real-time.
+Then open `http://localhost:8000/docs/`.
 
-### SquashIT Tool - File Compression
-1. Go to the "SquashIT" tab.
-2. Select the file you want to compress by clicking "Browse".
-3. Choose the compression method (zlib, gzip, tar.zlib).
-4. Set the compression level (0-9).
-5. Click "Compress" to start the compression process.
+## Validation
 
-### UnSquashIT Tool - File Decompression
-1. Go to the "SquashIT" tab.
-2. Select the compressed file by clicking "Browse".
-3. Click "UnSquashIT" to decompress the file.
+```bash
+python -m unittest discover -s tests -v
+python -m py_compile SheeKryptor.py crypto_core.py
+node --check docs/app.js
+```
 
-### ConvertX Tool - File Conversion
-1. Go to the "ConvertX" tab.
-2. Select the file you want to convert by clicking "Browse".
-3. Choose the conversion type (image to Base64, Base64 to image, text encoding, Base64 to text).
-4. Click "Convert" to start the conversion process.
-5. The converted file will be saved in the same directory as the original file.
+The test suite covers exact byte-for-byte round trips, empty and multi-megabyte files,
+wrong passwords, ciphertext tampering, atomic output behavior, and legacy migration.
 
-### Temp Mail Tool - Generate and Manage Temporary Emails
-1. Go to the "Temp Mail" tab.
-2. Enter Name and Password.
-3. Click "Generate" to generate a temporary email address.
-4. Refresh button to refresh messages.
+## Project layout
 
-## Themes and Font Customization
-1. Go to the "Settings" tab.
-2. Change the theme from the dropdown list.
-3. Customize the font style and size to your preference.
-4. Settings will be saved and applied on the next launch.
+| Path | Purpose |
+| --- | --- |
+| `crypto_core.py` | Testable, GUI-independent encryption and migration core |
+| `SheeKryptor.py` | Desktop interface and legacy toolbox features |
+| `docs/` | Static GitHub Pages web edition |
+| `tests/` | Security and regression tests |
+| `.github/` | CI, Pages deployment, and contributor templates |
 
-## About
+## Roadmap
 
-SheeKryptor is a simple but powerful tool for securely encrypting and decrypting files. It aims to provide a safe and easy-to-use solution for managing sensitive data.
+- Split the remaining desktop toolbox into testable modules.
+- Encrypt local TOTP seeds with a user-controlled vault key.
+- Add browser streaming support for files larger than 250 MB.
+- Package signed desktop releases for Windows, macOS, and Linux.
+- Request an independent security review before a stable security claim.
 
-- **Version**: v2.4.5
-- **Author**: Ahmeed Sheeko
-- **Contact**: sheekovic@gmail.com
+## Contributing
+
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), use synthetic
+test data, and never submit passwords, TOTP seeds, database files, API tokens, or
+personal encrypted files.
+
+Please report vulnerabilities privately according to [SECURITY.md](SECURITY.md).
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+SheeKryptor is available under the permissive [MIT License](LICENSE).
