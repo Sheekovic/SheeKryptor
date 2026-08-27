@@ -1,55 +1,34 @@
 @echo off
-:: Check if Python is installed
-python --version >nul 2>nul
+setlocal
+title SheeKryptor Setup
 
-:: If Python is not installed, download and install it
+where py >nul 2>nul
 if errorlevel 1 (
-    echo Python is not installed. Installing Python...
-    
-    :: Check operating system
-    if /i "%OS%"=="Windows_NT" (
-        echo Running on Windows. Downloading Python...
-
-        :: Download and install Python for Windows
-        powershell -Command "Invoke-WebRequest -Uri https://www.python.org/ftp/python/3.10.0/python-3.10.0.exe -OutFile python_installer.exe"
-        start /wait python_installer.exe /quiet InstallAllUsers=1 PrependPath=1
-        
-        :: Check if Python is installed now
-        python --version >nul 2>nul
-        if errorlevel 1 (
-            echo Python installation failed. Exiting...
-            exit /b 1
-        )
-    ) else (
-        echo Unsupported operating system. Exiting...
-        exit /b 1
-    )
+    echo Python was not found.
+    echo Install Python 3.10 or newer from https://www.python.org/downloads/
+    echo Then run this setup again.
+    pause
+    exit /b 1
 )
 
-:: Print Python version
-python --version
+echo Creating a private project environment...
+py -3 -m venv .venv
+if errorlevel 1 goto :failed
 
-:: Install required packages
-echo Installing required packages...
-echo Installing cryptography library...
-pip install cryptography
-echo Done installing cryptography.
-echo Installing ttkthemes library...
-pip install ttkthemes
-echo Done installing ttkthemes.
-echo Installing pyotp library...
-pip install pyotp
-echo Done installing pyotp.
-echo Installing pillow library...
-pip install pillow
-echo Done installing pillow.
-echo Installing requests library...
-pip install requests
-echo Done installing requests.
+call .venv\Scripts\activate.bat
+python -m pip install --upgrade pip
+if errorlevel 1 goto :failed
 
+python -m pip install -r requirements.txt
+if errorlevel 1 goto :failed
 
-:: Run the SheeKryptor script
-echo Running SheeKryptor...
-python sheekryptor.py
+echo.
+echo Setup complete. Starting SheeKryptor...
+python SheeKryptor.py
+exit /b %errorlevel%
 
+:failed
+echo.
+echo Setup failed. Review the error above; no system-wide packages were installed.
 pause
+exit /b 1

@@ -1,0 +1,30 @@
+# Local secrets and mutable application data
+2fa_accounts.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Generated files
+encrypted_files/
+decrypted_files/
+*.skrypt
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local settings and test artifacts
+*.tmp
+coverage.xml
+.coverage
+htmlcov/

@@ -1,26 +1,25 @@
 import base64
-import gzip
 import hashlib
 import json
 import os
-import queue
-import random
+import secrets
 import sqlite3
 import string
-import tarfile
-import threading
-import zlib
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives import hashes, padding
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import requests
 from ttkthemes import ThemedTk
-from cryptography.hazmat.backends import default_backend
 import tkinter.font as tkFont
 import pyotp
 import configparser
+
+from archive_core import ArchiveError, create_zip, extract_zip
+from crypto_core import CryptoError, decrypt_file as decrypt_path
+from crypto_core import encrypt_file as encrypt_path
+
+APP_NAME = "SheeKryptor"
+APP_VERSION = "3.0.0"
+REQUEST_TIMEOUT = 20
 
 # Database Setup
 conn = sqlite3.connect("2fa_accounts.db")
@@ -56,9 +55,9 @@ config.read("settings.ini")
 settings_theme = config.get("Settings", "theme", fallback="equilux")
 # Default font style is 'OCR A Extended'
 settings_font_style = config.get(
-    "Settings", "font_style", fallback="OCR A Extended")
+    "Settings", "font_style", fallback="Segoe UI")
 settings_font_size = config.get(
-    "Settings", "font_size", fallback="16")  # Default font size is '16'
+    "Settings", "font_size", fallback="11")
 
 # Function to fetch title and version from the API
 
@@ -66,7 +65,10 @@ settings_font_size = config.get(
 def fetch_title_and_version():
     try:
         # Make the GET request to fetch the data
-        response = requests.get("https://sheekovic.github.io/api/api.json")
+        response = requests.get(
+            "https://sheekovic.github.io/api/api.json",
+            timeout=REQUEST_TIMEOUT,
+        )
         response.raise_for_status()  # Check for request errors
         data = response.json()
 
@@ -86,13 +88,13 @@ def fetch_title_and_version():
 
 
 def generate_password(length):
-    if length < 8:
+    if length < 12:
         messagebox.showwarning(
-            "Warning", "Password length should be at least 8 characters.")
+            "Warning", "Password length should be at least 12 characters.")
         return None
 
     characters = string.ascii_letters + string.digits + string.punctuation
-    password = ''.join(random.choice(characters) for i in range(length))
+    password = ''.join(secrets.choice(characters) for _ in range(length))
     return password
 
 # Function to update the password entry with the generated password
@@ -117,9 +119,9 @@ def generate_personalized_password():
     dob = dob_entry.get().strip()
     try:
         length = int(personal_password_length_entry.get())
-        if length < 8:
+        if length < 12:
             messagebox.showwarning(
-                "Warning", "Password length should be at least 8 characters.")
+                "Warning", "Password length should be at least 12 characters.")
             return
 
         if not name or not dob:
@@ -127,13 +129,13 @@ def generate_personalized_password():
                 "Warning", "Please provide both Name and Date of Birth.")
             return
 
-        # Combine Name, Date of Birth and Password Length to create a personalized seed
-        personalized_seed = name + dob + str(length)
-        hashed_seed = hashlib.sha256(
-            personalized_seed.encode('utf-8')).hexdigest()
-
-        # Generate a password based on the hashed seed
-        password = ''.join(random.choice(hashed_seed) for i in range(length))
+        # Personal details are mixed into the character pool, but secure system
+        # randomness supplies the password entropy. They never seed a PRNG.
+        personalized_seed = hashlib.sha256(
+            (name + dob).encode('utf-8')).hexdigest()
+        characters = string.ascii_letters + string.digits + string.punctuation
+        characters += personalized_seed
+        password = ''.join(secrets.choice(characters) for _ in range(length))
 
         personal_password_entry.delete(0, 'end')
         personal_password_entry.insert(0, password)
@@ -142,69 +144,17 @@ def generate_personalized_password():
             "Error", "Please enter a valid number for password length.")
 
 
-# Function to generate a key from a password using PBKDF2
-def derive_key(password, salt, length=32):
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=length,
-        salt=salt,
-        iterations=100000,
-        backend=default_backend()
-    )
-    return kdf.derive(password.encode())
-
-# Function to encrypt a file
-
-
 def encrypt_file(input_file, output_file, password):
     try:
-        log("Starting encryption process...")
-
-        # Generate a random IV for encryption
-        iv = os.urandom(16)  # AES block size is 16 bytes
-        log(f"Generated IV: {iv.hex()}")
-
-        # Generate a salt for key derivation
-        salt = os.urandom(16)
-        log(f"Generated salt: {salt.hex()}")
-
-        # Derive the encryption key from the password and salt
-        key = derive_key(password, salt)
-        log(f"Derived encryption key: {key.hex()}")
-
-        # Read the input file data
-        log(f"Opening input file: {input_file}")
-        with open(input_file, 'rb') as f:
-            data = f.read()
-        log(f"Read {len(data)} bytes from the input file.")
-
-        # Apply padding to make data length a multiple of the block size (16 bytes)
-        # AES block size is 128 bits (16 bytes)
-        padder = padding.PKCS7(128).padder()
-        padded_data = padder.update(data) + padder.finalize()
-        log(f"Padded data length: {len(padded_data)} bytes.")
-
-        # Encrypt the file data using AES (CBC mode)
-        log("Starting encryption with AES (CBC mode)...")
-        cipher = Cipher(algorithms.AES(key), modes.CBC(iv),
-                        backend=default_backend())
-        encryptor = cipher.encryptor()
-        encrypted_data = encryptor.update(padded_data) + encryptor.finalize()
-        log(f"Encryption completed. {
-            len(encrypted_data)} bytes of encrypted data.")
-
-        # Write the salt, IV, and encrypted data to the output file
-        log(f"Saving encrypted data to output file: {output_file}")
-        with open(output_file, 'wb') as f:
-            f.write(salt)  # Store the salt for later key derivation
-            f.write(iv)    # Store the IV
-            f.write(encrypted_data)
+        log("Starting authenticated encryption...")
+        log(f"Reading input file: {input_file}")
+        encrypt_path(input_file, output_file, password)
         log(f"Output file saved successfully: {output_file}")
 
         messagebox.showinfo(
             "Success", f"Encryption completed. Output saved to:\n{output_file}")
 
-    except Exception as e:
+    except (CryptoError, OSError) as e:
         log(f"Error occurred during encryption: {e}")
         messagebox.showerror("Error", f"Failed to encrypt file: {e}")
 
@@ -214,38 +164,26 @@ def encrypt_file(input_file, output_file, password):
 def decrypt_file(input_file, output_file, password):
     try:
         decryptor_log.insert("end", "Starting decryption process...\n")
-
-        with open(input_file, 'rb') as f:
-            # Read the salt, IV, and encrypted data
-            salt = f.read(16)
-            iv = f.read(16)
-            encrypted_data = f.read()
-        decryptor_log.insert("end", f"Read salt: {salt.hex()}\n")
-        decryptor_log.insert("end", f"Read IV: {iv.hex()}\n")
-
-        # Derive the decryption key from the password and salt
-        key = derive_key(password, salt)
-        decryptor_log.insert("end", f"Derived decryption key: {key.hex()}\n")
-
-        # Decrypt the data using AES (CBC mode)
-        cipher = Cipher(algorithms.AES(key), modes.CBC(iv),
-                        backend=default_backend())
-        decryptor = cipher.decryptor()
-        decrypted_data = decryptor.update(
-            encrypted_data) + decryptor.finalize()
-        decryptor_log.insert("end", f"Decrypted data length: {
-                             len(decrypted_data)} bytes.\n")
-
-        # Write the decrypted data to the output file
-        with open(output_file, 'wb') as f:
-            f.write(decrypted_data)
+        used_legacy_format = decrypt_path(input_file, output_file, password)
         decryptor_log.insert(
             "end", f"Decryption completed. Output saved to: {output_file}\n")
+
+        if used_legacy_format:
+            decryptor_log.insert(
+                "end",
+                "Warning: this file used the unauthenticated legacy format. "
+                "Encrypt the recovered file again to upgrade it.\n",
+            )
+            messagebox.showwarning(
+                "Legacy encrypted file",
+                "The file was recovered using SheeKryptor's legacy format. "
+                "Encrypt it again to upgrade it to authenticated encryption.",
+            )
 
         messagebox.showinfo(
             "Success", f"Decryption completed. Output saved to:\n{output_file}")
 
-    except Exception as e:
+    except (CryptoError, OSError) as e:
         decryptor_log.insert("end", f"Error occurred during decryption: {e}\n")
         messagebox.showerror("Error", f"Failed to decrypt file: {e}")
 
@@ -277,19 +215,27 @@ def get_output_file_path(input_file, is_encryption=True):
     base_name = os.path.basename(input_file)
     name, ext = os.path.splitext(base_name)
 
-    # If it's encryption, append 'encrypted' to the filename
     if is_encryption:
-        new_name = f"{name}_encrypted{ext}"
+        new_name = f"{base_name}.skrypt"
         output_directory = encrypted_output_directory
     else:
-        new_name = f"{name}_decrypted{ext}"
+        new_name = base_name[:-8] if base_name.lower().endswith(".skrypt") else f"{name}_decrypted{ext}"
         output_directory = decrypted_output_directory
 
     # Ensure the output directory exists
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
 
-    return os.path.join(output_directory, new_name)
+    output_path = os.path.join(output_directory, new_name)
+    candidate_name, candidate_ext = os.path.splitext(new_name)
+    counter = 1
+    while os.path.exists(output_path):
+        output_path = os.path.join(
+            output_directory, f"{candidate_name}_{counter}{candidate_ext}"
+        )
+        counter += 1
+
+    return output_path
 
 # Function to start encryption
 
@@ -432,15 +378,19 @@ def send_api_request():
     try:
         # Send the API request based on the selected type
         if request_type == "GET":
-            response = requests.get(api_url, headers=headers_dict)
+            response = requests.get(
+                api_url, headers=headers_dict, timeout=REQUEST_TIMEOUT
+            )
         elif request_type == "POST":
             response = requests.post(api_url, json=json.loads(
-                request_body), headers=headers_dict)
+                request_body), headers=headers_dict, timeout=REQUEST_TIMEOUT)
         elif request_type == "PUT":
             response = requests.put(api_url, json=json.loads(
-                request_body), headers=headers_dict)
+                request_body), headers=headers_dict, timeout=REQUEST_TIMEOUT)
         elif request_type == "DELETE":
-            response = requests.delete(api_url, headers=headers_dict)
+            response = requests.delete(
+                api_url, headers=headers_dict, timeout=REQUEST_TIMEOUT
+            )
 
         # Display the response in the response area
         response_text.delete(1.0, "end")  # Clear previous response
@@ -564,123 +514,59 @@ def refresh_accounts():
 def update_otps():
     for child in accounts_table.get_children():
         item = accounts_table.item(child)
-        username = item['values'][0]
+        values = list(item['values'])
+        account_id = values[0]
 
         cursor.execute(
-            "SELECT key FROM accounts WHERE username = ?", (username,))
+            "SELECT key FROM accounts WHERE id = ?", (account_id,))
         account = cursor.fetchone()
         if account:
             otp = pyotp.TOTP(account[0])
             current_otp = otp.now()
-            accounts_table.item(child, values=(username, current_otp))
+            values[3] = current_otp
+            accounts_table.item(child, values=values)
 
     root.after(1000, update_otps)  # Refresh OTPs every second
 
 
 def unsquashit(input_file, output_dir):
-    """Decompress the Squashed file into the same directory as the input file."""
+    """Extract a ZIP archive into a dedicated directory."""
     try:
-        # Ensure input_file is a string, not a list
         if isinstance(input_file, list):
-            input_file = input_file[0]  # Process the first file if it's a list
-
-        # Define the output file path to be in the same directory as input file
-        output_file_path = os.path.join(
-            output_dir, os.path.basename(input_file).replace(".zlib", ""))
-
-        # Read the input file
-        with open(input_file, "rb") as f_in:
-            data = f_in.read()
-
-        # Attempt decompression
-        try:
-            decompressed_data = zlib.decompress(data)
-        except zlib.error as e:
-            return f"Decompression failed: {e}"
-
-        # Save the decompressed data to the output directory (same as input file)
-        with open(output_file_path, "wb") as f_out:
-            f_out.write(decompressed_data)
-
-        return f"Unsquash completed successfully! Saved to {output_file_path}"
-
-    except Exception as e:
-        return f"Unsquash failed: {str(e)}"
+            input_file = input_file[0] if input_file else ""
+        archive_path = os.path.abspath(input_file)
+        if not output_dir:
+            output_dir = os.path.splitext(archive_path)[0]
+        extracted = extract_zip(archive_path, output_dir)
+        result = f"Extracted {len(extracted)} item(s) to {output_dir}"
+        unsquashit_result_label.config(text=result, foreground=green)
+        return result
+    except (ArchiveError, OSError) as e:
+        result = f"Extraction failed: {e}"
+        unsquashit_result_label.config(text=result, foreground=red)
+        return result
 
 
-def squashit(input_files, output_file, compression_level=9, compression_format='zlib'):
-    """Compress the selected files into a squash file with the given compression format."""
+def squashit(input_files, output_file, compression_level=9, _compression_format='zip'):
+    """Create a standard ZIP archive from the selected files."""
     try:
-        total_size = sum(os.path.getsize(f)
-                         for f in input_files)  # Total size of all files
-        compressed_data = bytearray()
-        compressed_data_size = 0
+        def update_progress(value):
+            squashit_progress_bar["value"] = value
+            root.update_idletasks()
 
-        # Create a queue for progress updates
-        progress_queue = queue.Queue()
-
-        # Define a function to compress each file
-        def compress_file(file_path):
-            nonlocal compressed_data, compressed_data_size
-            with open(file_path, "rb") as f:
-                data = f.read()
-
-            # Compress data in chunks and update progress via the queue
-            for i in range(0, len(data), 1024 * 1024):  # 1MB chunk size
-                chunk = data[i:i + 1024 * 1024]
-                if compression_format == 'gz':
-                    compressed_chunk = gzip.compress(
-                        chunk, compresslevel=compression_level)
-                elif compression_format == 'tar.zlib':
-                    compressed_chunk = zlib.compress(
-                        chunk, level=compression_level)
-                else:  # Default zlib compression
-                    compressed_chunk = zlib.compress(
-                        chunk, level=compression_level)
-
-                compressed_data.extend(compressed_chunk)
-                compressed_data_size += len(compressed_chunk)
-
-                # Put progress data in the queue
-                progress = (compressed_data_size / total_size) * 100
-                progress_queue.put(progress)
-
-        # Start threads for each file
-        threads = []
-        for file in input_files:
-            thread = threading.Thread(target=compress_file, args=(file,))
-            thread.start()
-            threads.append(thread)
-
-        # Update progress bar from the main thread
-        def update_progress():
-            if not progress_queue.empty():
-                progress = progress_queue.get()
-                squashit_progress_bar["value"] = progress
-                squashit_progress_bar.update()
-                # Schedule next update
-                squashit_tab.after(100, update_progress)
-
-        update_progress()  # Start updating progress
-
-        # Wait for all threads to complete
-        for thread in threads:
-            thread.join()
-
-        # Save the compressed data to the output file
-        with open(output_file, "wb") as f_out:
-            f_out.write(compressed_data)
-
-        # Generate checksum
-        file_hash = hashlib.sha256(compressed_data).hexdigest()
-        squashit_result_label.config(text=f"Compression completed! Checksum: {
-                                     file_hash}", foreground="green")
-        return f"Compression completed successfully! Saved to {output_file} with checksum: {file_hash}"
-
-    except Exception as e:
-        squashit_result_label.config(text=f"Compression failed: {
-                                     str(e)}", foreground="red")
-        return f"Compression failed: {e}"
+        file_hash = create_zip(
+            input_files,
+            output_file,
+            compression_level=compression_level,
+            progress=update_progress,
+        )
+        result = f"ZIP archive created. SHA-256: {file_hash}"
+        squashit_result_label.config(text=result, foreground=green)
+        return result
+    except (ArchiveError, OSError) as e:
+        result = f"Compression failed: {e}"
+        squashit_result_label.config(text=result, foreground=red)
+        return result
 
 
 def browse_file(entry):
@@ -702,9 +588,10 @@ def browse_folder(entry):
 def browse_output(entry, operation_type):
     """Browse and select the output file or directory based on the operation."""
     if operation_type == 'SquashIt':
-        # For SquashIt, allow the user to select a compressed file to save
-        output_path = filedialog.asksaveasfilename(defaultextension=".zlib", filetypes=[
-            ("Zlib Files", "*.zlib"), ("All Files", "*.*")])
+        output_path = filedialog.asksaveasfilename(
+            defaultextension=".zip",
+            filetypes=[("ZIP Archives", "*.zip"), ("All Files", "*.*")],
+        )
     elif operation_type == 'UnSquashIt':
         # For UnSquashIt, allow the user to select a folder for decompressed files
         output_path = filedialog.askdirectory()  # Asking for a directory path
@@ -712,14 +599,6 @@ def browse_output(entry, operation_type):
     if output_path:
         entry.delete(0, tk.END)
         entry.insert(0, output_path)
-
-# Function to handle setting the selected compression format
-
-
-def set_compression_format(event=None):
-    """Set the selected compression format."""
-    global selected_format
-    selected_format = format_combobox.get()
 
 # Function to handle conversion ConvertX
 
@@ -841,7 +720,9 @@ def generate_temp_mail():
     # Declare globals for use in `refresh_messages`
     global headers, messages_url, messages_result_text
     # Get Available Domains
-    domain_response = requests.get("https://api.mail.tm/domains")
+    domain_response = requests.get(
+        "https://api.mail.tm/domains", timeout=REQUEST_TIMEOUT
+    )
     domain_response.raise_for_status()  # Check for request errors
     domain_data = domain_response.json()
 
@@ -858,7 +739,9 @@ def generate_temp_mail():
         "address": name + "@" + domain,
         "password": password
     }
-    account_response = requests.post(account_url, json=account_data)
+    account_response = requests.post(
+        account_url, json=account_data, timeout=REQUEST_TIMEOUT
+    )
     account_response.raise_for_status()
     account_details = account_response.json()
 
@@ -875,7 +758,9 @@ def generate_temp_mail():
         "address": account_details['address'],
         "password": password
     }
-    token_response = requests.post(token_url, json=login_data)
+    token_response = requests.post(
+        token_url, json=login_data, timeout=REQUEST_TIMEOUT
+    )
     token_response.raise_for_status()
     token_details = token_response.json()
 
@@ -886,7 +771,9 @@ def generate_temp_mail():
     headers = {
         "Authorization": f"Bearer {jwt_token}"
     }
-    messages_response = requests.get(messages_url, headers=headers)
+    messages_response = requests.get(
+        messages_url, headers=headers, timeout=REQUEST_TIMEOUT
+    )
     messages_response.raise_for_status()
     messages_data = messages_response.json()
 
@@ -900,7 +787,9 @@ def generate_temp_mail():
 def refresh_messages():
     # Use global variables defined in `generate_temp_mail`
     global headers, messages_url, messages_result_text
-    messages_response = requests.get(messages_url, headers=headers)
+    messages_response = requests.get(
+        messages_url, headers=headers, timeout=REQUEST_TIMEOUT
+    )
     messages_response.raise_for_status()
     messages_data = messages_response.json()
 
@@ -924,7 +813,11 @@ def refresh_messages():
 # Function to handle about SheeKryptor
 def about_sheekryptor():
     messagebox.showinfo(
-        "About SheeKryptor", "SheeKryptor is a secure encryption and decryption tool.\n\nVersion: v1.0.0\n\nAuthor: Ahmeed Sheeko\n\nContact: sheekovic@gmail.com")
+        "About SheeKryptor",
+        f"{APP_NAME} protects files with authenticated encryption.\n\n"
+        f"Version: {APP_VERSION}\n\nAuthor: Ahmed Sheeko\n\n"
+        "GitHub: github.com/Sheekovic/SheeKryptor",
+    )
 
 
 """
@@ -932,99 +825,188 @@ def about_sheekryptor():
 this is the main GUI
 you can add widgets here
 """
-root = ThemedTk(theme='equilux')
+root = ThemedTk(theme=settings_theme)
+root.title(f"{APP_NAME} {APP_VERSION}")
+screen_width = root.winfo_screenwidth()
+screen_height = root.winfo_screenheight()
+window_width = max(800, min(1280, screen_width - 80))
+window_height = max(640, min(860, screen_height - 80))
+window_x = max(0, (screen_width - window_width) // 2)
+window_y = max(0, (screen_height - window_height) // 2)
+root.geometry(f"{window_width}x{window_height}+{window_x}+{window_y}")
+root.minsize(min(960, window_width), min(680, window_height))
+root.configure(background="#07111f")
+root.grid_columnconfigure(0, weight=1)
+root.grid_rowconfigure(1, weight=1)
 
-# Fetch title and version from the API
-title, version = fetch_title_and_version()
+try:
+    root.iconbitmap("assets/SheeKryptor.ico")
+except tk.TclError:
+    pass
 
-root.title(f"{title} {version}")
-
-# Set the window icon
-root.iconbitmap("assets/SheeKryptor.ico")
-
-# Constants
-fontStyle = "OCR A Extended"
-fontSize = 16
+fontStyle = settings_font_style if settings_font_style else "Segoe UI"
+fontSize = int(settings_font_size) if str(settings_font_size).isdigit() else 11
 headerFontSize = fontSize + 10
 
-# Colors
-black = "#000000"
-white = "#FFFFFF"
-green = "#00FF00"
-red = "#FF0000"
-gray = "#433e3f"
+black = "#07111f"
+white = "#edf5ff"
+green = "#43e6b1"
+red = "#ff758b"
+gray = "#0e1c2d"
+muted = "#94a9bf"
+input_background = "#091524"
+border = "#263a50"
 
-# Create the style object before creating tabs
-style = ttk.Style()
+style = ttk.Style(root)
+style.configure(
+    "TNotebook", background=black, borderwidth=0, tabmargins=(0, 8, 0, 0)
+)
+style.configure(
+    "TNotebook.Tab",
+    background=gray,
+    foreground=muted,
+    borderwidth=0,
+    padding=(10, 10),
+    font=(fontStyle, 9, "bold"),
+)
+style.map(
+    "TNotebook.Tab",
+    background=[("selected", "#153046"), ("active", "#13283b")],
+    foreground=[("selected", green), ("active", white)],
+)
+style.configure(
+    "TFrame", background=gray, relief="flat"
+)
+style.configure(
+    "TLabel", background=gray, foreground=white, font=(fontStyle, fontSize)
+)
+style.configure(
+    "TEntry",
+    fieldbackground=input_background,
+    foreground=white,
+    bordercolor=border,
+    lightcolor=border,
+    darkcolor=border,
+    padding=(10, 8),
+    font=(fontStyle, fontSize),
+)
+style.configure(
+    "TCombobox",
+    fieldbackground=input_background,
+    background=input_background,
+    foreground=white,
+    arrowcolor=green,
+    padding=(8, 6),
+    font=(fontStyle, fontSize),
+)
+style.map(
+    "TCombobox",
+    fieldbackground=[("readonly", input_background)],
+    foreground=[("readonly", white)],
+)
+style.configure(
+    "TButton",
+    background="#153047",
+    foreground=white,
+    borderwidth=0,
+    padding=(14, 9),
+    font=(fontStyle, max(fontSize - 1, 9), "bold"),
+)
+style.map(
+    "TButton",
+    background=[("pressed", "#1aa77e"), ("active", "#1c425b")],
+    foreground=[("pressed", "#03251c"), ("active", white)],
+)
+style.configure(
+    "Accent.TButton",
+    background=green,
+    foreground="#03251c",
+    padding=(18, 11),
+    font=(fontStyle, max(fontSize - 1, 9), "bold"),
+)
+style.map(
+    "Accent.TButton",
+    background=[("pressed", "#25bd91"), ("active", "#65efc1")],
+    foreground=[("pressed", "#03251c"), ("active", "#03251c")],
+)
+style.configure("TCheckbutton", background=gray, foreground=white)
+style.configure("TRadiobutton", background=gray, foreground=white)
+style.configure("TScrollbar", background="#183149", troughcolor=gray)
+style.configure(
+    "Treeview",
+    background=input_background,
+    fieldbackground=input_background,
+    foreground=white,
+    rowheight=30,
+)
+style.configure(
+    "Treeview.Heading",
+    background="#153047",
+    foreground=white,
+    font=(fontStyle, max(fontSize - 1, 9), "bold"),
+)
+style.map("Treeview", background=[("selected", "#1b5b64")])
+style.configure("TProgressbar", background=green, troughcolor=input_background)
 
-# Defult Style Configuration
-style.configure("TNotebook", background=black,
-                foreground=green, font=(fontStyle, fontSize))
-style.configure('TEntry', background=black,
-                foreground=green, font=(fontStyle, fontSize))
-style.configure('TCombobox', font=(fontStyle, fontSize))
-style.map('TCombobox', fieldbackground=[
-          ('readonly', black)], foreground=[('readonly', green)])
-# Configure the default button style
-style.configure('TButton', background="black",
-                foreground="green", font=(fontStyle, fontSize))
-# Map the button style for different states (active, pressed, and hover)
-style.map('TButton',
-          foreground=[('pressed', 'white'),  # Green text when pressed
-                      ('active', green)])
-style.configure('TLabel', background=black,
-                foreground=green, font=(fontStyle, fontSize))
-style.configure('TFrame', background=black,
-                foreground=green, font=(fontStyle, fontSize))
-style.configure('TCheckbutton', background=black,
-                foreground=green, font=(fontStyle, fontSize))
-style.configure('TCanvas', background=black,
-                foreground=green, font=(fontStyle, fontSize))
-style.configure('TFrame', background=black,
-                foreground=green, font=(fontStyle, fontSize))
-style.configure('TScrollbar', background=black,
-                foreground=green, font=(fontStyle, fontSize))
-style.configure('Treeview', background=black,
-                foreground=green, font=(fontStyle, fontSize))
-style.configure('TRadiobutton', background=black,
-                foreground=green, font=(fontStyle, fontSize))
-style.configure('TProgressbar', background=black,
-                foreground=green, font=(fontStyle, fontSize))
+app_header = tk.Frame(root, background=black)
+app_header.grid(row=0, column=0, sticky="ew", padx=28, pady=(20, 12))
+app_header.grid_columnconfigure(0, weight=1)
+tk.Label(
+    app_header,
+    text=APP_NAME,
+    background=black,
+    foreground=white,
+    font=(fontStyle, 22, "bold"),
+).grid(row=0, column=0, sticky="w")
+tk.Label(
+    app_header,
+    text="Private tools. Local processing. Authenticated encryption.",
+    background=black,
+    foreground=muted,
+    font=(fontStyle, 10),
+).grid(row=1, column=0, sticky="w", pady=(3, 0))
+tk.Label(
+    app_header,
+    text=f"v{APP_VERSION}  |  AES-256-GCM",
+    background=black,
+    foreground=green,
+    font=(fontStyle, 9, "bold"),
+).grid(row=0, column=1, rowspan=2, sticky="e")
 
 # Create Tabs for Decryptor and Encryptor
 tab_control = ttk.Notebook(root, style="TNotebook")
 
 # Decryptor tab
 decryptor_tab = ttk.Frame(tab_control, style="TFrame")
-tab_control.add(decryptor_tab, text="Decryptor", padding=10)
+tab_control.add(decryptor_tab, text="Decrypt", padding=10)
 
 # Encryptor tab
 encryptor_tab = ttk.Frame(tab_control, style="TFrame")
-tab_control.add(encryptor_tab, text="Encryptor", padding=10)
+tab_control.add(encryptor_tab, text="Encrypt", padding=10)
 
 # PWD Generator tab
 pwd_generator_tab = ttk.Frame(tab_control, style="TFrame")
-tab_control.add(pwd_generator_tab, text="PWD Generator", padding=10)
+tab_control.add(pwd_generator_tab, text="Passwords", padding=10)
 
 # Add the API Testing Tab to the Notebook
 api_testing_tab = ttk.Frame(tab_control, style="TFrame")
-tab_control.add(api_testing_tab, text="API Testing", padding=10)
+tab_control.add(api_testing_tab, text="API", padding=10)
 
 # Add 2FA Tool Tab to the Notebook
 two_factor_tab = ttk.Frame(tab_control, style="TFrame")
-tab_control.add(two_factor_tab, text="2FA Tool", padding=10)
+tab_control.add(two_factor_tab, text="Authenticator", padding=10)
 
 # SquashIt tab
 squashit_tab = ttk.Frame(tab_control, style="TFrame")
-tab_control.add(squashit_tab, text="SquashIt", padding=10)
+tab_control.add(squashit_tab, text="Archive", padding=10)
 
 # ConvertX tab
 convertx_tab = ttk.Frame(tab_control, style="TFrame")
-tab_control.add(convertx_tab, text="ConvertX", padding=10)
+tab_control.add(convertx_tab, text="Convert", padding=10)
 
 # Temp Mail tab
 temp_mail_tab = ttk.Frame(tab_control, style="TFrame")
-tab_control.add(temp_mail_tab, text="Temp Mail", padding=10)
+tab_control.add(temp_mail_tab, text="Mail", padding=10)
 
 # Settings tab
 settings_tab = ttk.Frame(tab_control, style="TFrame")
@@ -1035,7 +1017,7 @@ about_tab = ttk.Frame(tab_control, style="TFrame")
 tab_control.add(about_tab, text="About", padding=10)
 
 # Center the tabs in the window
-tab_control.grid(row=0, column=0, sticky="nsew")
+tab_control.grid(row=1, column=0, sticky="nsew", padx=28, pady=(0, 24))
 
 """
 #################### Decryptor Tab ####################
@@ -1079,15 +1061,20 @@ decryptor_input_file_entry.grid(row=2, column=1, padx=10, pady=10, sticky="w")
 
 ttk.Label(decryptor_tab, text="Password:", style="TLabel").grid(
     row=3, column=0, padx=10, pady=10, sticky="e")
-decryptor_password_entry = ttk.Entry(decryptor_tab, width=70, style="TEntry")
+decryptor_password_entry = ttk.Entry(
+    decryptor_tab, width=70, style="TEntry", show="•"
+)
 decryptor_password_entry.grid(row=3, column=1, padx=10, pady=10, sticky="w")
 
 ttk.Button(decryptor_tab, text="Decrypt", command=start_decryption,
-           style="TButton").grid(row=4, column=0, columnspan=3, pady=20)
+           style="Accent.TButton").grid(row=4, column=0, columnspan=3, pady=20)
 
 # Log Text Area
 decryptor_log = tk.Text(decryptor_tab, width=80, height=10, wrap="word",
-                        state="normal", background=gray, foreground=green)
+                        state="normal", background=input_background,
+                        foreground=white, insertbackground=green,
+                        selectbackground="#1b5b64", relief="flat",
+                        padx=12, pady=12, font=(fontStyle, 10))
 decryptor_log.grid(row=5, column=0, columnspan=3, padx=10, pady=10)
 
 """
@@ -1129,15 +1116,20 @@ ttk.Button(encryptor_tab, text="Browse", command=browse_input_file_encrypt,
 
 ttk.Label(encryptor_tab, text="Password:", style="TLabel").grid(
     row=3, column=0, padx=10, pady=10, sticky="e")
-encryptor_password_entry = ttk.Entry(encryptor_tab, width=70, style="TEntry")
+encryptor_password_entry = ttk.Entry(
+    encryptor_tab, width=70, style="TEntry", show="•"
+)
 encryptor_password_entry.grid(row=3, column=1, padx=10, pady=10, sticky="w")
 
 ttk.Button(encryptor_tab, text="Encrypt", command=start_encryption,
-           style="TButton").grid(row=4, column=0, columnspan=3, pady=20)
+           style="Accent.TButton").grid(row=4, column=0, columnspan=3, pady=20)
 
 # log output text widget to display logs
 log_output_text = tk.Text(encryptor_tab, width=80, height=10,
-                          wrap="word", background=gray, foreground=green)
+                          wrap="word", background=input_background,
+                          foreground=white, insertbackground=green,
+                          selectbackground="#1b5b64", relief="flat",
+                          padx=12, pady=12, font=(fontStyle, 10))
 log_output_text.grid(row=5, column=0, columnspan=3, padx=10, pady=10)
 log_output_text.config(state='normal')
 log_output_text.insert('end', 'Encryption Log:\n')
@@ -1315,11 +1307,11 @@ username_entry = ttk.Entry(frame)
 username_entry.grid(row=1, column=1, padx=5, pady=5)
 
 ttk.Label(frame, text="2FA Key:").grid(row=2, column=0, padx=5, pady=5)
-key_entry = ttk.Entry(frame)
+key_entry = ttk.Entry(frame, show="•")
 key_entry.grid(row=2, column=1, padx=5, pady=5)
 
 time_based_checkbox = ttk.Checkbutton(
-    frame, text="Time Based", variable=time_based_var)
+    frame, text="TOTP (30-second codes)", variable=time_based_var)
 # Set the default value to True
 time_based_var.set(True)
 time_based_checkbox.grid(row=3, column=1, pady=5)
@@ -1359,7 +1351,7 @@ update_otps()
 
 """
 #################### SquashIt Tab ####################
-SquashIt is a tool that compresses files to the extreme using advanced algorithms (ZPAQ or PAQ8).
+SquashIt creates portable ZIP archives with safe extraction checks.
 """
 squashit_tab.grid_columnconfigure(0, weight=1)
 squashit_tab.grid_columnconfigure(1, weight=1)
@@ -1375,9 +1367,8 @@ ttk.Label(squashit_tab, text="SquashIt", style="TLabel").grid(
 ttk.Label(
     squashit_tab,
     text=(
-        "The SquashIt tool allows you to compress files to the extreme using advanced algorithms. "
-        "Select the file you wish to compress, choose the compression level, and click 'Compress' "
-        "to generate a compressed file."
+        "Create a standard ZIP archive that works across operating systems. "
+        "Select one or more files, choose the Deflate compression level, and create the archive."
     ),
     wraplength=600,  # Adjust width for better readability
     style="TLabel"
@@ -1413,14 +1404,14 @@ ttk.Label(squashit_tab, text="Compression Format:").grid(
     row=5, column=0, padx=10, pady=10)
 
 format_combobox = ttk.Combobox(
-    squashit_tab, values=["zlib", "gz", "tar.zlib"], state="readonly", width=15
+    squashit_tab, values=["ZIP (Deflate)"], state="readonly", width=15
 )
-format_combobox.set('zlib')  # Default value
+format_combobox.set("ZIP (Deflate)")
 format_combobox.grid(row=5, column=1, padx=10, pady=10)
 
 # Compression Button
 ttk.Button(squashit_tab, text="SquashIT", command=lambda: squashit(input_files_entry.get().split(', '), output_file_entry.get(
-), int(compression_level_combobox.get()), format_combobox.get())).grid(row=6, column=0, columnspan=3, pady=20)
+), int(compression_level_combobox.get()), format_combobox.get()), style="Accent.TButton").grid(row=6, column=0, columnspan=3, pady=20)
 
 # Result Label
 squashit_result_label = ttk.Label(
@@ -1437,7 +1428,7 @@ ttk.Button(squashit_tab, text="Browse", command=lambda: browse_file(
 
 # Decompression Button (updated to pass the correct arguments)
 ttk.Button(squashit_tab, text="UnSquashIT", command=lambda: unsquashit(
-    unsquashit_input_files_entry.get().split(', '), '')).grid(row=10, column=0, columnspan=3, pady=20)
+    unsquashit_input_files_entry.get().split(', '), ''), style="Accent.TButton").grid(row=10, column=0, columnspan=3, pady=20)
 
 # result Label
 unsquashit_result_label = ttk.Label(
@@ -1663,7 +1654,7 @@ ttk.Label(about_tab, text=app_description, wraplength=600, anchor="center", just
 
 # Version and Features
 version_info = (
-    "Version:"+version+"\n"
+    f"Version: {APP_VERSION}\n"
     "Features:\n"
     "- Secure File Encryption & Decryption\n"
     "- Strong Password Generator\n"
@@ -1689,7 +1680,5 @@ ttk.Label(about_tab, text=credits, anchor="center", justify="center", style="TLa
     row=3, column=0, columnspan=2, padx=20, pady=10, sticky="nsew"
 )
 
-# Load settings at startup
-load_settings()
-
+tab_control.select(decryptor_tab)
 root.mainloop()
